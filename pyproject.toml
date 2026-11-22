@@ -1,0 +1,12 @@
+[project]
+name = "quorumkv"
+version = "0.1.0"
+description = "Fault-tolerant distributed key-value store: Raft consensus + LSM-tree storage engine"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
