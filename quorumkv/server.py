@@ -241,9 +241,15 @@ class KVServer:
                 return 503, {"error": "no leader elected yet, retry"}
             return 307, {"error": "not leader", "leader": self.node.leader_id, "location": loc}
         except LeadershipLost:
-            return 503, {"error": "leadership changed; outcome unknown, retry"}
+            if method == "GET":  # reads change nothing, so they are always safe to retry
+                return 503, {"error": "leadership changed, retry"}
+            return 503, {"error": "leadership changed; write may or may not have been applied",
+                         "outcome": "unknown"}
         except asyncio.TimeoutError:
-            return 504, {"error": "timed out waiting for quorum"}
+            if method == "GET":
+                return 504, {"error": "timed out waiting for quorum, retry"}
+            return 504, {"error": "timed out waiting for quorum; write may or may not have been applied",
+                         "outcome": "unknown"}
         except (ValueError, UnicodeDecodeError) as e:
             return 400, {"error": str(e)}
 

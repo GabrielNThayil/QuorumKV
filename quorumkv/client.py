@@ -24,6 +24,10 @@ class QuorumError(Exception):
     pass
 
 
+class OutcomeUnknown(QuorumError):
+    """A non-idempotent write may or may not have been applied (e.g. leader changed mid-request)."""
+
+
 class QuorumClient:
     def __init__(self, nodes: list[str], timeout: float = 5.0, retries: int = 30):
         self.nodes = nodes
@@ -45,7 +49,14 @@ class QuorumClient:
         if c:
             c.close()
 
-    def request(self, method: str, path: str, body: bytes | None = None):
+    def request(self, method: str, path: str, body: bytes | None = None, idempotent: bool = True):
+        """Send a request, following leader redirects and retrying transient failures.
+
+        Retrying is only safe when repeating the operation can't change the result (reads, PUT,
+        DELETE). For a non-idempotent operation such as CAS, a failure after the request may have
+        reached the leader raises OutcomeUnknown instead: the write may or may not have committed,
+        and blindly retrying could apply it twice or misreport it.
+        """
         attempt = 0
         candidates = list(self.nodes)
         target = self.leader or candidates[0]
@@ -56,9 +67,16 @@ class QuorumClient:
                 resp = c.getresponse()
                 data = resp.read()
                 status = resp.status
-            except (OSError, http.client.HTTPException):
-                self._drop(target)
+            except ConnectionRefusedError:
+                self._drop(target)  # never reached the server: always safe to retry
                 status, data = None, b""
+            except (OSError, http.client.HTTPException) as e:
+                self._drop(target)
+                if not idempotent:
+                    raise OutcomeUnknown(f"{method} {path}: connection lost mid-request ({e!r})") from e
+                status, data = None, b""
+            if not idempotent and status in (503, 504) and data and json.loads(data).get("outcome") == "unknown":
+                raise OutcomeUnknown(f"{method} {path}: {json.loads(data)['error']}")
             if status == 307:
                 loc = urlsplit(json.loads(data)["location"])
                 target = self.leader = loc.netloc
@@ -88,7 +106,7 @@ class QuorumClient:
 
     def cas(self, key: str, expected: str | None, value: str) -> dict:
         body = json.dumps({"expected": expected, "value": value}).encode()
-        return self.request("POST", "/cas/" + quote(key, safe=""), body)[1]
+        return self.request("POST", "/cas/" + quote(key, safe=""), body, idempotent=False)[1]
 
     def scan(self, start: str | None = None, end: str | None = None, limit: int = 100) -> list[dict]:
         q = {k: v for k, v in {"start": start, "end": end, "limit": limit}.items() if v is not None}

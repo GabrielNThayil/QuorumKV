@@ -40,9 +40,15 @@ jobs:
           test "$(curl -sf -L http://localhost:8003/kv/foo)" = '{"key": "foo", "value": "bar"}'
           LEADER=$(curl -sf localhost:8001/status | python3 -c "import sys,json; print(json.load(sys.stdin)['leader'])")
           docker compose kill "$LEADER"
-          for n in 8001 8002 8003; do
-            curl -sf -L -X PUT --data after http://localhost:$n/kv/foo && break
+          # The survivors need a moment to elect a new leader, so keep retrying like a real client.
+          written=""
+          for i in $(seq 1 20); do
+            for n in 8001 8002 8003; do
+              curl -sf -L -X PUT --data after http://localhost:$n/kv/foo && written=1 && break 2
+            done
+            sleep 1
           done
+          [ -n "$written" ] || { echo "write after failover never succeeded"; exit 1; }
           for i in $(seq 1 20); do
             for n in 8001 8002 8003; do
               v=$(curl -sf -L http://localhost:$n/kv/foo) && [ "$v" = '{"key": "foo", "value": "after"}' ] && echo "ok via $n after killing $LEADER" && exit 0

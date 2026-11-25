@@ -129,7 +129,9 @@ Numbers vary by machine; rerun the script to measure yours.
   durability argument (nothing leaves the node before it is on disk), and it lets the simulator
   run thousands of adversarial schedules in seconds.
 - **Unknown outcomes.** If leadership changes while a write is in flight, the server returns
-  `503 outcome unknown`. The entry may still commit under the next leader. Exactly-once semantics
+  `503` marked `"outcome": "unknown"`. The entry may still commit under the next leader. The client
+  retries idempotent operations (reads, PUT, DELETE) on its own, but raises `OutcomeUnknown` for CAS rather
+  than retrying blindly, since a retried CAS could be misreported as failed after it already applied. Exactly-once semantics
   would need client sessions with sequence numbers (see roadmap).
 - **Python and the GIL.** Each node is a single asyncio event loop, which removes most locking
   questions. The cost is raw throughput: flush and compaction run inline on the loop.
