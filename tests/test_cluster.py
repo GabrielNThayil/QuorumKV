@@ -121,3 +121,19 @@ def test_restarted_node_catches_up_from_disk_and_leader(cluster):
     assert stale.get("b49", stale=True) == "49"
     assert stale.get("a0", stale=True) == "0"
     client.close()
+
+
+def test_redirects_use_client_urls_when_configured(tmp_path):
+    """Behind Docker port mapping, redirects must point at the address clients use."""
+    from quorumkv.server import KVServer, parse_cluster
+
+    members = parse_cluster("n1=node1:7000:8000,n2=node2:7000:8000")
+    plain = KVServer("n1", members, str(tmp_path / "a"))
+    mapped = KVServer("n1", members, str(tmp_path / "b"), client_urls={"n2": "http://localhost:8002/"})
+    for s in (plain, mapped):
+        s.node.leader_id = "n2"
+    assert plain._leader_url("/kv/x") == "http://node2:8000/kv/x"
+    assert mapped._leader_url("/kv/x") == "http://localhost:8002/kv/x"
+    for s in (plain, mapped):
+        s.raft_storage.close()
+        s.engine.close()

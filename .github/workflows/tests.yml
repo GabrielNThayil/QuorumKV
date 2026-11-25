@@ -1,0 +1,55 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install test dependencies
+        run: python -m pip install pytest
+      - name: Run tests (unit, chaos simulator, multi-process cluster)
+        run: python -m pytest tests -v
+
+  docker:
+    name: Docker Compose cluster smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start 3-node cluster
+        run: docker compose up --build -d
+      - name: Write through any node, read back, survive a node kill
+        run: |
+          for i in $(seq 1 30); do curl -sf localhost:8001/status && break; sleep 1; done
+          curl -sf -L -X PUT --data bar http://localhost:8002/kv/foo
+          test "$(curl -sf -L http://localhost:8003/kv/foo)" = '{"key": "foo", "value": "bar"}'
+          LEADER=$(curl -sf localhost:8001/status | python3 -c "import sys,json; print(json.load(sys.stdin)['leader'])")
+          docker compose kill "$LEADER"
+          for n in 8001 8002 8003; do
+            curl -sf -L -X PUT --data after http://localhost:$n/kv/foo && break
+          done
+          for i in $(seq 1 20); do
+            for n in 8001 8002 8003; do
+              v=$(curl -sf -L http://localhost:$n/kv/foo) && [ "$v" = '{"key": "foo", "value": "after"}' ] && echo "ok via $n after killing $LEADER" && exit 0
+            done
+            sleep 1
+          done
+          exit 1
+      - name: Logs on failure
+        if: failure()
+        run: docker compose logs

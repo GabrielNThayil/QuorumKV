@@ -70,9 +70,10 @@ def parse_cluster(spec: str) -> dict[str, dict]:
 class KVServer:
     def __init__(self, node_id: str, members: dict[str, dict], data_dir: str,
                  tick_ms: int = 20, fsync: bool = True, bind_host: str | None = None,
-                 request_timeout: float = 5.0):
+                 request_timeout: float = 5.0, client_urls: dict[str, str] | None = None):
         self.id = node_id
         self.members = members
+        self.client_urls = client_urls or {}
         self.tick_s = tick_ms / 1000
         self.bind_host = bind_host or members[node_id]["host"]
         self.request_timeout = request_timeout
@@ -181,6 +182,8 @@ class KVServer:
         leader = self.node.leader_id
         if leader is None or leader not in self.members:
             return None
+        if leader in self.client_urls:  # address clients use, e.g. a published Docker port
+            return self.client_urls[leader].rstrip("/") + path
         m = self.members[leader]
         return f"http://{m['host']}:{m['http']}{path}"
 
@@ -337,13 +340,17 @@ def main() -> None:
     ap.add_argument("--cluster", required=True, help="id=host:raft_port:http_port,...")
     ap.add_argument("--data", required=True)
     ap.add_argument("--bind", default=None, help="bind address (default: this node's host)")
+    ap.add_argument("--client-urls", default="",
+                    help="id=url,... addresses clients use to reach each node's HTTP API, used in leader "
+                         "redirects (e.g. published Docker ports). Default: host:http_port from --cluster")
     ap.add_argument("--tick-ms", type=int, default=20)
     ap.add_argument("--no-fsync", action="store_true", help="skip fsync on the Raft log (faster, less durable)")
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args()
     logging.basicConfig(level=args.log_level, format="%(asctime)s %(levelname)s %(message)s")
+    client_urls = dict(p.split("=", 1) for p in args.client_urls.split(",") if p)
     server = KVServer(args.id, parse_cluster(args.cluster), args.data, tick_ms=args.tick_ms,
-                      fsync=not args.no_fsync, bind_host=args.bind)
+                      fsync=not args.no_fsync, bind_host=args.bind, client_urls=client_urls)
     try:
         asyncio.run(server.run())
     except KeyboardInterrupt:

@@ -1,5 +1,8 @@
 # QuorumKV
 
+[![tests](https://github.com/GabrielNThayil/QuorumKV/actions/workflows/tests.yml/badge.svg)](https://github.com/GabrielNThayil/QuorumKV/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A fault-tolerant, strongly consistent distributed key-value store, built from scratch:
 **Raft consensus** for replication and a **log-structured merge-tree (LSM) storage engine** for
 persistence. Pure Python 3.11 standard library, no external dependencies.
@@ -88,10 +91,14 @@ curl -L -X PUT --data "bar" http://localhost:8001/kv/foo
 docker compose kill node1        # kill a node; the cluster keeps serving
 ```
 
+Inside Compose the nodes reach each other as `nodeN:7000`, while clients on the host use the
+published ports. `--client-urls` tells each node which address to put in leader redirects, so
+`curl -L` against any node works from the host.
+
 ## Testing
 
 ```bash
-python -m pytest tests -q          # 34 tests
+python -m pytest tests -q          # 35 tests
 ```
 
 | Suite | What it proves |
@@ -134,6 +141,9 @@ Numbers vary by machine; rerun the script to measure yours.
 - Background flush/compaction; leveled compaction
 - A Jepsen-style history checker (Knossos/Porcupine-style linearizability verification)
 
+CI runs the full suite on Linux and Windows with Python 3.11-3.13, plus a Docker Compose smoke
+test that writes through a follower and keeps serving after the leader container is killed.
+
 ## Layout
 
 ```
@@ -152,3 +162,7 @@ quorumkv/
 tests/                simulator, unit, chaos and end-to-end tests
 bench/bench.py        throughput/latency benchmark
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
